@@ -6,7 +6,7 @@
 # Datasource local storage ignored files
 /dataSources/
 /dataSources.local.xml
-
+.gitgnore
 
 gan_checkpoints
 checkpoints
@@ -17,3 +17,4 @@ minist手写识别报告.docx
 minist手写识别报告.pdf
 Apriori算法实验报告.docx
 Apriori算法实验报告.pdf
+logs
