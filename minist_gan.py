@@ -50,7 +50,7 @@ def train():
 
         cv2.destroyAllWindows()
 
-    raise
+   
     # 必要目录
     log_dir = os.path.join(".", 'logs')
     ckpt_dir = os.path.join(".", 'gan_checkpoints')
@@ -150,7 +150,7 @@ def infer():
     # 推理
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     generator = Generator(100).to(device)
-    generator.load_state_dict(torch.load("gan_checkpoints\generator_epoch_40d_loss0.7918398380279541_g_loss2.1149394512176514.pth", map_location=device))
+    generator.load_state_dict(torch.load("gan_checkpoints\generator_epoch_50d_loss0.7229504585266113_g_loss2.0990352630615234.pth", map_location=device))
     generator.eval()
     # print(generator)
     zz = torch.randn(100, 100).to(device)
@@ -168,28 +168,23 @@ def infer():
 
     log_dir = os.path.join(".", 'logs')
     os.makedirs(log_dir, exist_ok=True)
-    img_path = os.path.join(log_dir, f'test1.png')
+    img_path = os.path.join(log_dir, f'test.png')
     cv2.imwrite(img_path, combined_image)
     print(f'Saved {img_path}')
 
-    # z = torch.randn(10, 100).to(device)
-    # fake_images = generator(z)
-    # fake_images = fake_images.view(fake_images.size(0), 1, 28, 28)
-    # fake_images = fake_images.data.cpu().numpy()
-    # fake_images = ((fake_images + 1) / 2 * 255).astype(np.uint8)  # 反归一化
+    if args.show_fake:
+        cv2.imshow(f'Generated Images ', combined_image)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
 
-    # for i in range(10):
-    #     img = fake_images[i][0]
-    #     cv2.imshow(f'Generated Image {i+1}', img)
-    #     cv2.waitKey(0)
 
-    # cv2.destroyAllWindows()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train or infer gan model.')
     #parser.add_argument('--mode', type=str, required=True, choices=['train', 'infer'], help='Mode to run the script in: train or infer')
     parser.add_argument('--mode', type=str, default='infer', choices=['train', 'infer'], help='Mode to run the script in: train or infer')
-    parser.add_argument('--show_images', action='store_true', help='Whether to show generated images')
+    parser.add_argument('--show_images', action='store_true', help='Whether to show original images')
+    parser.add_argument('--show_fake', action='store_true', help='Whether to show generated images')
     args = parser.parse_args()
 
     if args.mode == 'train':
