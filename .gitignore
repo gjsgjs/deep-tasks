@@ -12,6 +12,8 @@ gan_checkpoints
 checkpoints
 runs
 runss
+vit_run
+vit_checkpoints
 mnist.pkl
 minist手写识别报告.docx
 minist手写识别报告.pdf

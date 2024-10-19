@@ -326,7 +326,7 @@ class SelfAttentionPooling(nn.Module):
 
 # 定义ViT模型类
 class ViT(nn.Module):
-    def __init__(self, image_size=32, patch_size=4, num_classes=10, dim=256, depth=6, heads=8, mlp_dim=128,dropout=0.1):
+    def __init__(self, image_size=32, patch_size=4, num_classes=10, dim=256, depth=6, heads=8, mlp_dim=128,dropout=0.1, model_type='transformer'):
         super(ViT, self).__init__()
         self.patch_size = patch_size
         self.dim = dim
@@ -341,7 +341,10 @@ class ViT(nn.Module):
         # 本任务没必要同时用到编码器和解码器
         # self.transformer = nn.Transformer(dim, heads, depth)
         # 只用到depth层编码器 
-        self.transformerencoder = myConformerLayer(dim, heads, dim_head=64, num_layers=depth,dropout=dropout)
+        if model_type == 'transformer':
+            self.transformerencoder = myTransformerencoderLayer(dim, heads, dim_head=64, num_layers=depth,dropout=dropout)
+        elif model_type == 'conformer':
+            self.transformerencoder = myConformerLayer(dim, heads, dim_head=64, num_layers=depth,dropout=dropout)
         # pytorch的这个怎么没有dim_head
         # encoder_layer = nn.TransformerEncoderLayer(d_model=dim, nhead=heads, dim_feedforward=256,batch_first=True)
         # self.transformerencoder = nn.TransformerEncoder(encoder_layer, num_layers=depth)
