@@ -5,6 +5,7 @@ import torch.nn as nn
 import cv2
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR
+from einops import rearrange
 
 # # 定义生成器和判别器
 # class Generator(nn.Module):
@@ -153,9 +154,85 @@ def save_model(generator, discriminator, epoch, d_loss,g_loss,path='gan_checkpoi
 # x = G(z1)
 # print(x.shape)
 
+# my_attention
+class FeedForward(nn.Module):
+    def __init__(self, dim, hidden_dim, dropout = 0.):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(dim, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, dim),
+            nn.Dropout(dropout)
+        )
+    def forward(self, x):
+        return self.net(x)
+
+
+class Attention(nn.Module):
+    def __init__(self, dim, heads = 8, dim_head = 64, dropout = 0.):
+        super().__init__()
+        inner_dim = dim_head *  heads # 每一个heads的qkv(1)维度
+        project_out = not (heads == 1 and dim_head == dim)
+
+        self.heads = heads
+        self.scale = dim_head ** -0.5
+
+        self.attend = nn.Softmax(dim = -1) # 注意力权重计算
+        self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False) # 一个dim到heads*qkv(3)的映射
+
+        self.to_out = nn.Sequential(
+            nn.Linear(inner_dim, dim),
+            nn.Dropout(dropout)
+        ) if project_out else nn.Identity() # 将多头的输出映射到dim维度
+
+    def forward(self, x):
+        qkv = self.to_qkv(x).chunk(3, dim = -1) # 拆分qkv 3个(N,LEN,dim_head*heads)
+        # q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), qkv) # qkv每一个 (N,heads,LEN,dim_head)
+        q, k, v = (t.view(t.shape[0], t.shape[1], self.heads, -1).transpose(1, 2) for t in qkv)
+        dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale # 点积计算attention权重
+
+        attn = self.attend(dots) # attention经过一个softmax
+
+        out = torch.matmul(attn, v) # 根据权重乘以v得到输出
+        # out = rearrange(out, 'b h n d -> b n (h d)') # 将heads维度合并
+        out = out.transpose(1, 2).contiguous().view(out.shape[0], out.shape[2], -1)
+        return self.to_out(out) # 输出映射回dim维度
+
+class myTransformerencoderLayer(nn.Module):
+    def __init__(self, dim, heads, dim_head,num_layers,dim_feedforward=256, dropout=0.):
+        super().__init__()
+        self.layers = nn.ModuleList([
+            nn.ModuleList([
+                Attention(dim, heads, dim_head=dim_head, dropout=dropout),
+                FeedForward(dim, dim_feedforward, dropout=dropout),
+                nn.LayerNorm(dim),
+                nn.LayerNorm(dim),
+            ]) for _ in range(num_layers)
+        ])
+    
+    def forward(self, x):
+        for attention, feed_forward, norm1, norm2 in self.layers:
+            x = norm1(x + (attention(x)))
+            x = norm2(x + (feed_forward(x)))
+            # 先norm
+            # x = x + self.dropout(self.attention(self.norm1(x)))
+            # x = x + self.dropout(self.feedforward(self.norm2(x)))
+        return x
+    
+# seq = torch.ones(10, 20, 64) # (N,len,dim)
+# tran = myTransformerencoderLayer(dim=64, heads=8,dim_head=64,num_layers=6)
+# x = tran(seq)
+
+
+
+
+
+
+
 # 定义ViT模型类
 class ViT(nn.Module):
-    def __init__(self, image_size=32, patch_size=4, num_classes=10, dim=64, depth=6, heads=8, mlp_dim=128):
+    def __init__(self, image_size=32, patch_size=4, num_classes=10, dim=256, depth=6, heads=8, mlp_dim=128,dropout=0.1):
         super(ViT, self).__init__()
         self.patch_size = patch_size
         self.dim = dim
@@ -170,8 +247,10 @@ class ViT(nn.Module):
         # 本任务没必要同时用到编码器和解码器
         # self.transformer = nn.Transformer(dim, heads, depth)
         # 只用到depth层编码器 
-        encoder_layer = nn.TransformerEncoderLayer(d_model=dim, nhead=heads, dim_feedforward=256,batch_first=True)
-        self.transformerencoder = nn.TransformerEncoder(encoder_layer, num_layers=depth)
+        self.transformerencoder = myTransformerencoderLayer(dim, heads, dim_head=64, num_layers=depth,dropout=dropout)
+        # pytorch的这个怎么没有dim_head
+        # encoder_layer = nn.TransformerEncoderLayer(d_model=dim, nhead=heads, dim_feedforward=256,batch_first=True)
+        # self.transformerencoder = nn.TransformerEncoder(encoder_layer, num_layers=depth)
 
         self.mlp_head = nn.Sequential(
             nn.LayerNorm(dim),

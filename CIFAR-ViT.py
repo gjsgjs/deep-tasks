@@ -14,6 +14,22 @@ from qqdm import qqdm
 train_data_dir = 'CIFAR10_imbalanced'
 test_data_dir = 'CIFAR10_balance'
 
+
+#
+transform_train = transforms.Compose([
+    transforms.RandomCrop(32, padding=4),
+    transforms.Resize(32),
+    transforms.RandomHorizontalFlip(),
+    transforms.ToTensor(),
+    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+])
+#
+transform_test = transforms.Compose([
+    transforms.Resize(32),
+    transforms.ToTensor(),
+    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+])
+
 # 定义数据转换
 transform = transforms.Compose([
     transforms.ToTensor(),
@@ -25,11 +41,11 @@ batch_size = 128
 warmup_steps = 1000
 total_steps = 20000
 # 加载训练数据集
-train_dataset = datasets.ImageFolder(train_data_dir, transform=transform)
+train_dataset = datasets.ImageFolder(train_data_dir, transform=transform_train)
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
 # 加载测试数据集
-test_dataset = datasets.ImageFolder(test_data_dir, transform=transform)
+test_dataset = datasets.ImageFolder(test_data_dir, transform=transform_test)
 test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
 
@@ -64,7 +80,7 @@ class_weights = class_weights.to(device)
 # 定义损失函数和优化器
 criterion = nn.CrossEntropyLoss(class_weights)
 # optimizer = optim.Adam(model.parameters(), lr=0.001)
-optimizer = optim.AdamW(model.parameters(), lr=1e-3)
+optimizer = optim.AdamW(model.parameters(), lr=1e-4)
 scheduler = get_cosine_schedule_with_warmup(optimizer, warmup_steps, total_steps)
 
 # 训练模型
