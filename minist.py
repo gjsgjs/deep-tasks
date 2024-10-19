@@ -1,7 +1,10 @@
+import math
 import os
 import torch
 import torch.nn as nn
 import cv2
+from torch.optim import Optimizer
+from torch.optim.lr_scheduler import LambdaLR
 
 # # 定义生成器和判别器
 # class Generator(nn.Module):
@@ -47,6 +50,7 @@ def weights_init(m):
         m.weight.data.normal_(1.0, 0.02)
         m.bias.data.fill_(0)
 
+# dim 为隐藏层的维度
 class Generator(nn.Module):
     """
     Input shape: (N, in_dim)
@@ -148,3 +152,94 @@ def save_model(generator, discriminator, epoch, d_loss,g_loss,path='gan_checkpoi
 # G.eval()
 # x = G(z1)
 # print(x.shape)
+
+# 定义ViT模型类
+class ViT(nn.Module):
+    def __init__(self, image_size=32, patch_size=4, num_classes=10, dim=64, depth=6, heads=8, mlp_dim=128):
+        super(ViT, self).__init__()
+        self.patch_size = patch_size
+        self.dim = dim
+        # 一个图片有多少个patch
+        self.num_patches = (image_size // patch_size) ** 2
+        # 每一个patch映射到一个vector
+        self.patch_embedding = nn.Linear(patch_size * patch_size * 3, dim)
+        # 可训练的位置编码
+        self.position_embedding = nn.Parameter(torch.randn(1, self.num_patches + 1, dim))
+        # 可训练的分类标记
+        self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
+        # 本任务没必要同时用到编码器和解码器
+        # self.transformer = nn.Transformer(dim, heads, depth)
+        # 只用到depth层编码器 
+        encoder_layer = nn.TransformerEncoderLayer(d_model=dim, nhead=heads, dim_feedforward=256,batch_first=True)
+        self.transformerencoder = nn.TransformerEncoder(encoder_layer, num_layers=depth)
+
+        self.mlp_head = nn.Sequential(
+            nn.LayerNorm(dim),
+            nn.Linear(dim, mlp_dim),
+            nn.ReLU(),
+            nn.Linear(mlp_dim, num_classes)
+        )
+
+    def forward(self, x):
+        B, C, H, W = x.shape # (N,3,32,32)
+        x = x.view(B, C, H // self.patch_size, self.patch_size, W // self.patch_size, self.patch_size) # (N,3,8,4,8,4)
+        x = x.permute(0, 2, 4, 3, 5, 1).contiguous().view(B, -1, self.patch_size * self.patch_size * 3) # (N,64,48)
+        x = self.patch_embedding(x) # (N,64,64)
+        cls_tokens = self.cls_token.expand(B, -1, -1) # (N,1,64) class标签复制N份
+        x = torch.cat((cls_tokens, x), dim=1) # (N,65,64) 拼接class标签 num_patches+1
+        x += self.position_embedding # (N,65,64) 加上位置编码
+        x = self.transformerencoder(x) # (N,65,64) 编码器输出
+        # x = self.mlp_head(x[:, 0]) # (N,10)    x[:, 0] (N,64)只取第一个位置的输出 
+        # x = torch.mean(x, dim=1)  # (N,64) # x[:, 0]可以替代为取所有位置的平均值
+        x = torch.mean(x, dim=1)
+        x = self.mlp_head(x)
+        return x
+    
+# img = torch.ones(10, 3, 32, 32)
+# model = ViT()
+# x = model(img)
+# print(x)
+
+
+def get_cosine_schedule_with_warmup(
+  optimizer: Optimizer,
+  num_warmup_steps: int,
+  num_training_steps: int,
+  num_cycles: float = 0.5,
+  last_epoch: int = -1,
+):
+  """
+  Create a schedule with a learning rate that decreases following the values of the cosine function between the
+  initial lr set in the optimizer to 0, after a warmup period during which it increases linearly between 0 and the
+  initial lr set in the optimizer.
+
+  Args:
+    optimizer (:class:`~torch.optim.Optimizer`):
+      The optimizer for which to schedule the learning rate.
+    num_warmup_steps (:obj:`int`):
+      The number of steps for the warmup phase.
+    num_training_steps (:obj:`int`):
+      The total number of training steps.
+    num_cycles (:obj:`float`, `optional`, defaults to 0.5):
+      The number of waves in the cosine schedule (the defaults is to just decrease from the max value to 0
+      following a half-cosine).
+    last_epoch (:obj:`int`, `optional`, defaults to -1):
+      The index of the last epoch when resuming training.
+
+  Return:
+    :obj:`torch.optim.lr_scheduler.LambdaLR` with the appropriate schedule.
+  """
+
+  def lr_lambda(current_step):
+    # Warmup
+    if current_step < num_warmup_steps:
+      return float(current_step) / float(max(1, num_warmup_steps))
+    # decadence
+    progress = float(current_step - num_warmup_steps) / float(
+      max(1, num_training_steps - num_warmup_steps)
+    )
+    return max(
+      0.0, 0.5 * (1.0 + math.cos(math.pi * float(num_cycles) * 2.0 * progress))
+    )
+
+  return LambdaLR(optimizer, lr_lambda, last_epoch)
