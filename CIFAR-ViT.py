@@ -39,7 +39,7 @@ transform = transforms.Compose([
 #
 batch_size = 128
 warmup_steps = 1000
-total_steps = 20000
+total_steps = 22000
 # 加载训练数据集
 train_dataset = datasets.ImageFolder(train_data_dir, transform=transform_train)
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -84,7 +84,7 @@ optimizer = optim.AdamW(model.parameters(), lr=1e-4)
 scheduler = get_cosine_schedule_with_warmup(optimizer, warmup_steps, total_steps)
 
 # 训练模型
-num_epochs = 500
+num_epochs = 80
 step = 0
 for e,epoch in enumerate(range(num_epochs)):
     progress_bar = qqdm(train_loader)

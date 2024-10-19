@@ -220,12 +220,106 @@ class myTransformerencoderLayer(nn.Module):
             # x = x + self.dropout(self.feedforward(self.norm2(x)))
         return x
     
+class Swish(nn.Module):
+    def forward(self, x):
+        return x * torch.sigmoid(x)
+    
+class ConvModule(nn.Module):
+     def __init__(self, dim, kernel_size=31, dropout=0.):
+        super().__init__()
+        self.layer_norm = nn.LayerNorm(dim)
+        self.pointwise_conv1 = nn.Conv1d(dim, 2 * dim, kernel_size=1)
+        self.glu = nn.GLU(dim=1)
+        self.depthwise_conv = nn.Conv1d(dim, dim, kernel_size=kernel_size, padding=kernel_size // 2, groups=dim)
+        self.batch_norm = nn.BatchNorm1d(dim)
+        self.swish = Swish()
+        self.pointwise_conv2 = nn.Conv1d(dim, dim, kernel_size=1)
+        self.dropout = nn.Dropout(dropout)
+
+     def forward(self, x):
+        # Apply LayerNorm
+        x = self.layer_norm(x)
+        # Transpose for Conv1d
+        x = x.transpose(1, 2)  # (N, L, d) -> (N, d, L)
+        # Pointwise Convolution 1 + GLU
+        x = self.pointwise_conv1(x)
+        x = self.glu(x)
+        # Depthwise Conv
+        x = self.depthwise_conv(x)
+        x = self.batch_norm(x)
+        x = self.swish(x)
+         # Pointwise Conv2
+        x = self.pointwise_conv2(x)
+        # Transpose back
+        x = x.transpose(1, 2)   # (N, d, L) -> (N, L, d)
+        x = self.dropout(x)
+        return x
+     
+# seq = torch.ones(10, 20, 64)  # (batch_size, seq_len, dim)
+# conv_module = ConvModule(dim=64)
+# output = conv_module(seq)  
+
+class myConformerLayer(nn.Module):
+    def __init__(self, dim, heads, dim_head, num_layers, dim_feedforward=256, kernel_size=31, dropout=0.,half_step_residual=True):
+        super().__init__()
+        # 是否使用半步残差
+        if half_step_residual:
+            self.residual_factor = 0.5
+        else:
+            self.residual_factor = 1
+
+        self.layers = nn.ModuleList([
+            nn.ModuleList([
+                FeedForward(dim, dim_feedforward, dropout=dropout),
+                Attention(dim, heads, dim_head=dim_head, dropout=dropout),
+                ConvModule(dim, kernel_size=kernel_size, dropout=dropout),
+                FeedForward(dim, dim_feedforward, dropout=dropout),
+                nn.LayerNorm(dim),
+                nn.LayerNorm(dim),
+                nn.LayerNorm(dim),
+                nn.LayerNorm(dim),
+            ]) for _ in range(num_layers)
+        ])
+
+    def forward(self, x):
+        for feed_forward1, attention, conv_module, feed_forward2, norm1, norm2, norm3,norm4 in self.layers:
+            x = norm1(x + self.residual_factor * feed_forward1(x))
+            x = norm2(x +  attention(x))
+            x = norm3(x +  conv_module(x))
+            x = norm4(x + self.residual_factor * feed_forward2(x))
+        return x
+           
+    
 # seq = torch.ones(10, 20, 64) # (N,len,dim)
-# tran = myTransformerencoderLayer(dim=64, heads=8,dim_head=64,num_layers=6)
+# tran = myConformerLayer(dim=64, heads=8,dim_head=64,num_layers=6)
 # x = tran(seq)
 
 
+class SelfAttentionPooling(nn.Module):
+    """
+    Implementation of SelfAttentionPooling 
+    Original Paper: Self-Attention Encoding and Pooling for Speaker Recognition
+    https://arxiv.org/pdf/2008.01077v1.pdf
+    """
+    def __init__(self, input_dim):
+        super(SelfAttentionPooling, self).__init__()
+        self.W = nn.Linear(input_dim, 1)
+        
+    def forward(self, batch_rep):
+        """
+        input:
+            batch_rep : size (N, T, H), N: batch size, T: sequence length, H: Hidden dimension
 
+        attention_weight:
+            att_w : size (N, T, 1)
+
+        return:
+            utter_rep: size (N, H)
+        """
+        softmax = nn.functional.softmax
+        att_w = softmax(self.W(batch_rep).squeeze(-1), dim=-1).unsqueeze(-1)
+        utter_rep = torch.sum(batch_rep * att_w, dim=1)
+        return utter_rep
 
 
 
@@ -247,10 +341,12 @@ class ViT(nn.Module):
         # 本任务没必要同时用到编码器和解码器
         # self.transformer = nn.Transformer(dim, heads, depth)
         # 只用到depth层编码器 
-        self.transformerencoder = myTransformerencoderLayer(dim, heads, dim_head=64, num_layers=depth,dropout=dropout)
+        self.transformerencoder = myConformerLayer(dim, heads, dim_head=64, num_layers=depth,dropout=dropout)
         # pytorch的这个怎么没有dim_head
         # encoder_layer = nn.TransformerEncoderLayer(d_model=dim, nhead=heads, dim_feedforward=256,batch_first=True)
         # self.transformerencoder = nn.TransformerEncoder(encoder_layer, num_layers=depth)
+        self.attention_pooling = SelfAttentionPooling(dim) # 不知道有没有用
+
 
         self.mlp_head = nn.Sequential(
             nn.LayerNorm(dim),
@@ -270,7 +366,8 @@ class ViT(nn.Module):
         x = self.transformerencoder(x) # (N,65,64) 编码器输出
         # x = self.mlp_head(x[:, 0]) # (N,10)    x[:, 0] (N,64)只取第一个位置的输出 
         # x = torch.mean(x, dim=1)  # (N,64) # x[:, 0]可以替代为取所有位置的平均值
-        x = torch.mean(x, dim=1)
+        # x = torch.mean(x, dim=1)
+        x = self.attention_pooling(x)
         x = self.mlp_head(x)
         return x
     
