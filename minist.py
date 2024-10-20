@@ -169,6 +169,45 @@ class FeedForward(nn.Module):
         return self.net(x)
 
 
+class LSA(nn.Module):
+    def __init__(self, dim, heads = 8, dim_head = 64, dropout = 0.):
+        super().__init__()
+        inner_dim = dim_head *  heads
+        self.heads = heads
+        self.temperature = nn.Parameter(torch.log(torch.tensor(dim_head ** -0.5)))
+
+        self.attend = nn.Softmax(dim = -1)
+        self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
+
+        self.to_out = nn.Sequential(
+            nn.Linear(inner_dim, dim),
+            nn.Dropout(dropout)
+        )
+
+    def forward(self, x):
+        qkv = self.to_qkv(x).chunk(3, dim = -1)
+        # q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), qkv)
+        q, k, v = (t.view(t.shape[0], t.shape[1], self.heads, -1).transpose(1, 2) for t in qkv)
+
+        dots = torch.matmul(q, k.transpose(-1, -2)) * self.temperature.exp()
+
+        mask = torch.eye(dots.shape[-1], device = dots.device, dtype = torch.bool) # 生成一个对角线为True的mask
+        mask_value = -torch.finfo(dots.dtype).max #  获取负无穷大值
+        dots = dots.masked_fill(mask, mask_value) # 应用掩码，将对角线元素设置为负无穷大 消除自己的相关性
+
+        attn = self.attend(dots) # 计算注意力权重(对角线为0)
+
+        out = torch.matmul(attn, v)
+        # out = rearrange(out, 'b h n d -> b n (h d)')
+        out = out.transpose(1, 2).contiguous().view(out.shape[0], out.shape[2], -1)
+        return self.to_out(out)
+
+# seq = torch.ones(10, 20, 100)
+# lsa = LSA(100)
+# x = lsa(seq)
+
+
+
 class Attention(nn.Module):
     def __init__(self, dim, heads = 8, dim_head = 64, dropout = 0.):
         super().__init__()
@@ -220,6 +259,27 @@ class myTransformerencoderLayer(nn.Module):
             # x = x + self.dropout(self.feedforward(self.norm2(x)))
         return x
     
+class mylsaTransformerencoderLayer(nn.Module):
+    def __init__(self, dim, heads, dim_head,num_layers,dim_feedforward=256, dropout=0.):
+        super().__init__()
+        self.layers = nn.ModuleList([
+            nn.ModuleList([
+                LSA(dim, heads, dim_head=dim_head, dropout=dropout),
+                FeedForward(dim, dim_feedforward, dropout=dropout),
+                nn.LayerNorm(dim),
+                nn.LayerNorm(dim),
+            ]) for _ in range(num_layers)
+        ])
+    
+    def forward(self, x):
+        for attention, feed_forward, norm1, norm2 in self.layers:
+            x = norm1(x + (attention(x)))
+            x = norm2(x + (feed_forward(x)))
+            # 先norm
+            # x = x + self.dropout(self.attention(self.norm1(x)))
+            # x = x + self.dropout(self.feedforward(self.norm2(x)))
+        return x
+
 class Swish(nn.Module):
     def forward(self, x):
         return x * torch.sigmoid(x)
@@ -345,6 +405,8 @@ class ViT(nn.Module):
             self.transformerencoder = myTransformerencoderLayer(dim, heads, dim_head=64, num_layers=depth,dropout=dropout)
         elif model_type == 'conformer':
             self.transformerencoder = myConformerLayer(dim, heads, dim_head=64, num_layers=depth,dropout=dropout)
+        elif model_type == 'lsa':
+            self.transformerencoder = mylsaTransformerencoderLayer(dim, heads, dim_head=64, num_layers=depth,dropout=dropout)
         # pytorch的这个怎么没有dim_head
         # encoder_layer = nn.TransformerEncoderLayer(d_model=dim, nhead=heads, dim_feedforward=256,batch_first=True)
         # self.transformerencoder = nn.TransformerEncoder(encoder_layer, num_layers=depth)

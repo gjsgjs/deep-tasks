@@ -11,7 +11,7 @@ from minist import ViT, get_cosine_schedule_with_warmup
 from qqdm import qqdm
 import time
 from torch.utils.tensorboard import SummaryWriter
-
+from torchsummary import summary
 
 # 数据目录
 train_data_dir = 'CIFAR10_imbalanced'
@@ -159,11 +159,14 @@ def train():
             print(f'Models saved at epoch {epoch},step {step}')
 
 def infer():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = ViT(model_type=args.model).to(device)
+    summary(model, (3, 32, 32))
     pass
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train VIT model.')
-    parser.add_argument('--model', type=str, default='transformer', choices=['transformer', 'conformer'], help='which model to use: transformer or confermer')
+    parser.add_argument('--model', type=str, default='transformer', choices=['transformer', 'conformer','lsa'], help='which model to use: transformer or confermer')
     parser.add_argument('--learning_rate', type=float, default=1e-4, help='learning rate for training')
     parser.add_argument('--batch_size', type=int, default=128, help='batch_size for training')
     parser.add_argument('--warmup_steps', type=int, default=1000, help='warmup steps for learning rate scheduler')
