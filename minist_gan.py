@@ -150,7 +150,9 @@ def infer():
     # 推理
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     generator = Generator(100).to(device)
-    generator.load_state_dict(torch.load("gan_checkpoints\generator_epoch_50d_loss0.7229504585266113_g_loss2.0990352630615234.pth", map_location=device))
+    check_point = "gan_checkpoints\generator_epoch_35d_loss0.8335685729980469_g_loss1.5297629833221436.pth"
+    generator.load_state_dict(torch.load(check_point, map_location=device))
+    print(f'Loaded {check_point}')
     generator.eval()
     # print(generator)
     zz = torch.randn(100, 100).to(device)
@@ -168,7 +170,7 @@ def infer():
 
     log_dir = os.path.join(".", 'logs')
     os.makedirs(log_dir, exist_ok=True)
-    img_path = os.path.join(log_dir, f'test.png')
+    img_path = os.path.join(log_dir, f'test0.png')
     cv2.imwrite(img_path, combined_image)
     print(f'Saved {img_path}')
 

@@ -7,7 +7,7 @@ import torch.optim as optim
 import cv2
 from torchvision import datasets, transforms
 from torch.utils.data import random_split, DataLoader
-from minist import ViT, get_cosine_schedule_with_warmup
+from minist import ViT, classBalance_loss, get_cosine_schedule_with_warmup
 from qqdm import qqdm
 import time
 from torch.utils.tensorboard import SummaryWriter
@@ -64,6 +64,8 @@ if False:
     # 显示图片和标签
     show_images_cv2(images, labels, train_dataset.classes)
 
+from torchvision.models import resnet18
+
 def train():
     # 
     writer = SummaryWriter(f'vit_run/{args.model}_run')
@@ -83,6 +85,8 @@ def train():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # 模型替换
     model = ViT(model_type=args.model).to(device)
+    if args.model == 'resnet18':
+        model = resnet18(pretrained=False, num_classes=10).to(device)
     print("加载的模型是："+args.model)
     # 计算类权重,加权损失函数 写一个args
     class_counts = torch.tensor([train_dataset.targets.count(i) for i in range(10)])
@@ -90,6 +94,8 @@ def train():
     class_weights = class_weights.to(device)
     # 定义损失函数和优化器
     if args.weight:
+        if args.classifier_loss !='CE':
+            print('Using '+args.classifier_loss+' weighted loss')
         print('Using weighted loss')
         criterion = nn.CrossEntropyLoss(class_weights)
     else:
@@ -110,7 +116,10 @@ def train():
             images = images.to(device)
             labels = labels.to(device)
             outputs = model(images)
-            loss = criterion(outputs, labels)
+            if args.classifier_loss == 'CE':
+                loss = criterion(outputs, labels)
+            else :
+                loss = classBalance_loss(device, labels, outputs, class_counts, 10, args.classifier_loss, 0.999)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -142,7 +151,11 @@ def train():
                 images = images.to(device)
                 labels = labels.to(device)
                 outputs = model(images)
-                loss = criterion(outputs, labels)
+                # loss = criterion(outputs, labels)
+                if args.classifier_loss == 'CE':
+                    loss = criterion(outputs, labels)
+                else :
+                    loss = classBalance_loss(device, labels, outputs, class_counts, 10, args.classifier_loss, 0.999)
                 test_loss += loss.item()
                 _, predicted = torch.max(outputs, 1)
                 total += labels.size(0)
@@ -166,7 +179,7 @@ def infer():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train VIT model.')
-    parser.add_argument('--model', type=str, default='transformer', choices=['transformer', 'conformer','lsa'], help='which model to use: transformer or confermer')
+    parser.add_argument('--model', type=str, default='transformer', choices=['transformer', 'conformer','lsa','resnet18'], help='which model to use: transformer or confermer')
     parser.add_argument('--learning_rate', type=float, default=1e-4, help='learning rate for training')
     parser.add_argument('--batch_size', type=int, default=128, help='batch_size for training')
     parser.add_argument('--warmup_steps', type=int, default=1000, help='warmup steps for learning rate scheduler')
@@ -175,6 +188,7 @@ if __name__ == '__main__':
     parser.add_argument('--save_epoch', type=int, default=10, help='save model every save_epoch')
     parser.add_argument('--mode', type=str, default='train', choices=['train', 'infer'], help='Mode to run the script in: train or infer')
     parser.add_argument('--weight',action='store_false', help='Whether to weight the loss function')
+    parser.add_argument('--classifier_loss', type=str, default='sigmoid', choices=['CE', 'softmax', 'sigmoid', 'focal'], help='classifier loss function')
     args = parser.parse_args()
 
     if args.mode == 'train':
