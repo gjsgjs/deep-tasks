@@ -295,14 +295,81 @@ def train():
     writer.add_graph(model, img)
     writer.close()
 
+def translate(image, x, y):
+    M = np.float32([[1, 0, x], [0, 1, y]])
+    shifted = cv2.warpAffine(image, M, (image.shape[1], image.shape[0]))
+    return shifted
+
+def rotate(image, angle):
+    (h, w) = image.shape[:2]
+    center = (w // 2, h // 2)
+    M = cv2.getRotationMatrix2D(center, angle, 1.0)
+    rotated = cv2.warpAffine(image, M, (w, h))
+    return rotated
+
+def test():
+     # 获取文件夹中的所有图片文件
+    input_folder = 'test_pics'
+    output_size=(28, 28)
+    # 获取文件夹中的所有图片文件
+    image_files = [f for f in os.listdir(input_folder) if os.path.isfile(os.path.join(input_folder, f))]
+    
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = LeNet5().to(device)
+    model.load_state_dict(torch.load("checkpoints\model_epoch_10.pth"))
+    
+    for image_file in image_files:
+        # 读取图像
+        image_path = os.path.join(input_folder, image_file)
+        image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+        
+        if image is None:
+            print(f"Failed to load image {image_file}")
+            continue
+        
+        # 裁剪图像到指定大小
+        resized_image = cv2.resize(image, output_size)
+        
+        # 二值化处理
+        _, binary_image = cv2.threshold(resized_image, 128, 255, cv2.THRESH_BINARY)
+
+        # 反转图像
+        binary_image = cv2.bitwise_not(binary_image)
+
+        # 应用不同程度的平移和旋转
+        if args.deal == 'translate':
+            binary_image = translate(binary_image, 2, 2)
+        elif args.deal == 'rotate':
+            binary_image = rotate(binary_image, 30)
+        # binary_image = translate(binary_image, 2, 2)
+        # binary_image = rotate(binary_image, 15)
+        
+        # 可视化处理后的图像
+        cv2.imshow('Processed Image', binary_image)
+        cv2.waitKey(0)  # 等待按键按下
+        cv2.destroyAllWindows()
+
+        # 将图像转换为模型的输入
+        img = binary_image / 255.0
+        img = img.reshape(1, 1, 28, 28)
+        i = model.infer(img, device)
+        print(f'Predicted number is {i}')
+
+
+
+
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train or infer LeNet-5 model.')
     #parser.add_argument('--mode', type=str, required=True, choices=['train', 'infer'], help='Mode to run the script in: train or infer')
-    parser.add_argument('--mode', type=str, default='infer', choices=['train', 'infer'], help='Mode to run the script in: train or infer')
+    parser.add_argument('--mode', type=str, default='infer', choices=['train', 'infer','test'], help='Mode to run the script in: train or infer')
+    parser.add_argument('--deal',type=str,default='none',choices=['none','translate','rotate'],help='deal with the image')
     args = parser.parse_args()
 
     if args.mode == 'train':
         train()
     elif args.mode == 'infer':
         infer()
+    elif args.mode == 'test':
+        test()
